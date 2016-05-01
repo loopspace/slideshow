@@ -1,0 +1,15 @@
+#playlist {
+    display: none;
+}
+
+#playlist > span {
+    font: 60px serif;
+    color: #ccc;
+    text-align: center;
+    background-color: black;
+}
+
+body {
+    margin: 0px;
+    overflow: hidden;
+}
