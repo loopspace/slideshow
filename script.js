@@ -1,15 +1,22 @@
 var playlist;
-var DOMURL = window.URL || window.webkitURL || window;
+var mouse = {x: 0, y: 0};
 
 function init() {
     var cvs = document.getElementById('cvs');
     var ctx = cvs.getContext('2d');
     var body = document.querySelector('body');
-    body.addEventListener('keydown', keypress, false);
-    body.addEventListener('click', mouseclick, false);
-    body.addEventListener('contextmenu', mouseclick, false);
+    playlist = new Playlist(ctx,body);
+    body.addEventListener('mousemove',
+			  function(e) {
+
+			      mouse.x = Math.floor(e.clientX/window.innerWidth*100+.5)/100;
+			      mouse.y = Math.floor(e.clientY/window.innerHeight*100+.5)/100;
+			      return false;
+			  },
+			  false);
     window.addEventListener('resize', setSize, false);
-    playlist = new Playlist('playlist',ctx);
+    setPlaylist(playlist);
+    playlist.start();
     setSize();
     window.requestAnimationFrame(draw);
 }
@@ -27,106 +34,263 @@ function setSize() {
     var h = window.innerHeight;
     cvs.width = w;
     cvs.height = h;
-    playlist.setElement();
 }
 
-function keypress(e) {
+function setPlaylist(p) {}
+
+function Playlist (ctx,body) {
+    var p = this;
+    body.addEventListener('keydown',
+			  function(e) {p.keypress(e); return false;},
+			  false);
+    body.addEventListener('click',
+			  function(e) {p.mouseclick(e); return false;},
+			  false);
+    body.addEventListener('contextmenu',
+			  function(e) {p.mouseclick(e); return false;},
+			  false);
+    this.elements = [];
+    this.context = ctx;
+    this.current = 0;
+    this.paused = true;
+    this.stime = Date.now();
+    this.pausetime = Date.now();
+    return this;
+}
+
+Playlist.prototype.keypress = function (e) {
     e.preventDefault();
     var k = e.keyCode;
-    console.log(e.keyCode);
     if (k == 37 || k == 8 || k == 33) {
 	// left arrow, backspace, page-up
-	playlist.previous();
+	this.previous();
     } else if (k == 39 || k == 32 || k == 13 || k == 34 || k == 78) {
 	// right arrow, space, return, page-down, n
-	playlist.next();
+	this.next();
     } else if (k == 80) {
 	// p
-	playlist.pause();
+	this.pause();
+    } else if (k == 76) {
+	// l
+	console.log(mouse);
+    } else if (k == 48 || k == 38) {
+	// 0, up
+	this.restart();
+    } else if (k == 40) {
+	//
+	this.finish();
+    } else {
+	console.log('New key: ' + k);
     }
     return false;
 }
 
-function mouseclick(e) {
+Playlist.prototype.mouseclick = function(e) {
     e.preventDefault();
     if (e.button == 0) {
-	playlist.next();
+	this.next();
     } else if (e.button == 2) {
-	playlist.previous();
+	this.previous();
     }
-    console.log(e.button);
 }
 
-function Playlist (id,ctx) {
-    var dv = document.getElementById(id);
-    this.elements = dv.children;
-    this.context = ctx;
-    this.current = 0;
-    this.setElement(this.current);
-    this.nelts = dv.children.length;
-    this.paused = true;
-    return this;
+Playlist.prototype.addElement = function(t) {
+    if (t.type == 'video') {
+	this.addVideo(t);
+    } else if (t.type == 'img') {
+	this.addImage(t);
+    } else if (t.type == 'text') {
+	this.addText(t);
+    }
 }
 
-Playlist.prototype.setElement = function(n = this.current) {
+Playlist.prototype.addElements = function(s) {
+    for (k in s) {
+	this.addElement(s[k]);
+    }
+}
+
+Playlist.prototype.addVideo = function(t) {
+    var elt = document.createElement('video');
+    var src;
+    for (k in t.sources) {
+	src = document.createElement('source');
+	for (a in t.sources[k]) {
+	    src.setAttribute(a,t.sources[k][a]);
+	}
+	elt.appendChild(src);
+    }
+    var p = this;
+    var inplay;
+    elt.addEventListener('ended',
+			 function(e) {
+			     inplay = false;
+			 });
+    this.elements.push(
+	{
+	    draw: function(dt) {
+		var w = p.context.canvas.width;
+		var h = p.context.canvas.height;
+		p.clear();
+		p.context.drawImage(elt,0,0,w,h);
+		return inplay;
+	    },
+	    activate: function() {
+		if (t.autoplay) {
+		    p.paused = false;
+		    elt.play();
+		}
+		inplay = true;
+	    },
+	    deactivate: function() {
+		elt.pause();
+	    },
+	    pause: function() {
+		elt.pause();
+	    },
+	    play: function() {
+		elt.play();
+	    },
+	    atend: function() {
+		if (t.loop) {
+		    p.repeat();
+		} else if (t.wait) {
+		} else {
+		    p.next();
+		}
+	    }
+	}
+    )
+}
+
+Playlist.prototype.addImage = function(t) {
+    var elt = document.createElement('img');
+    elt.setAttribute('src',t.src);
+    var effect;
+    if (t.effect) {
+	effect = t.effect;
+    } else {
+	effect = function(dt,w,h) {
+	    return {x: 0, y: 0, w: w, h: h}
+	}
+    }
+    var p = this;
+    this.elements.push(
+	{
+	    draw: function(dt) {
+		var w = p.context.canvas.width;
+		var h = p.context.canvas.height;
+		p.clear();
+		var c = effect(dt,w,h);
+		p.context.drawImage(elt,c.x,c.y,c.w,c.h);
+		if (t.duration && dt > t.duration) {
+		    return false;
+		} else {
+		    return true;
+		}
+	    },
+	    activate: function() {},
+	    deactivate: function() {},
+	    pause: function() {},
+	    play: function() {},
+	    atend: function() {
+		if (!t.wait) {
+		    p.next();
+		}
+	    },
+	}
+    )
+}
+
+Playlist.prototype.addText = function(t) {
+    var p = this;
+    var effect;
+    if (t.effect) {
+	effect = t.effect;
+    } else {
+	effect = function(dt,w,h,s) {
+	    return {w: w/2, h: h/2, style: s}
+	}
+    }
+    this.elements.push(
+	{
+	    draw: function(dt) {
+		var w = p.context.canvas.width;
+		var h = p.context.canvas.height;
+		var c = effect(dt,w,h,t.style);
+		p.clear(c.style.backgroundColour);
+		p.setStyle(c.style);
+		p.context.fillText(t.text,c.w,c.h);
+	    },
+	    activate: function() {},
+	    deactivate: function() {},
+	    pause: function() {},
+	    play: function() {},
+	    atend: function() {},
+	}
+    )
+}
+
+Playlist.prototype.start = function() {
     this.element = this.elements[this.current];
-    if (this.element) {
-	this.tag = this.element.tagName;
-	if (this.element.getAttribute('autoplay')) {
-	    this.pause(false);
-	}
-	if (this.tag == "svg") {
-	    var img = new Image();
-	    var svg = new Blob([this.element.outerHTML], {type: 'image/svg+xml;charset=utf-8'});
-	    var url = DOMURL.createObjectURL(svg);
-	    img.src = url;
-	    this.tag = 'IMG';
-	    this.element = img;
-	}
-	console.log(this.tag);
-	if (this.tag == 'SPAN') {
-	    var ctx = this.context;
-	    var style = window.getComputedStyle(this.element);
-	    ctx.textAlign = style.getPropertyValue('text-align');
-	    ctx.font = style.getPropertyValue('font-size') + ' ' + style.getPropertyValue('font-family');
-	    ctx.fillStyle = style.getPropertyValue('color');
-	    this.background = style.getPropertyValue('background-color');
-	} else {
-	    this.background = null;
-	}
-    }
+    this.element.activate();
+    this.stime = Date.now();
 }
 
 Playlist.prototype.next = function() {
     if (this.current < this.elements.length-1) {
-	this.pause(true);
+	this.element.deactivate();
 	this.current++;
-	this.setElement(this.current);
+	this.element = this.elements[this.current];
+	this.element.activate();
+	this.stime = Date.now();
+	this.pausetime = Date.now();
     }
 }
 
 Playlist.prototype.previous = function() {
     if (this.current > 0) {
-	this.pause(true);
+	this.element.deactivate();
 	this.current--;
-	this.setElement(this.current);
+	this.element = this.elements[this.current];
+	this.element.activate();
+	this.stime = Date.now();
+	this.pausetime = Date.now();
     }
 }
 
+Playlist.prototype.repeat = function() {
+    this.element.deactivate();
+    this.element.activate();
+    this.stime = Date.now();
+}
+
+Playlist.prototype.restart = function() {
+    this.element.deactivate();
+    this.current = 0;
+    this.element = this.elements[this.current];
+    this.element.activate();
+    this.stime = Date.now();
+}
+
+Playlist.prototype.finish = function() {
+    this.element.deactivate();
+    this.current = this.elements.length - 1;
+    this.element = this.elements[this.current];
+    this.element.activate();
+    this.stime = Date.now();
+}
+
 Playlist.prototype.draw = function() {
-    var elt = this.element;
-    var ctx = this.context;
-    var w = ctx.canvas.width;
-    var h = ctx.canvas.height;
-    if (this.tag == 'VIDEO') {
-	this.clear();
-	ctx.drawImage(elt,0,0,w,h);
-    } else if (this.tag == 'IMG') {
-	this.clear();
-	ctx.drawImage(elt,0,0,w,h);
-    } else if (this.tag == 'SPAN') {
-	this.clear(this.background);
-	ctx.fillText(elt.innerHTML,w/2,h/2);
+    var dt;
+    if (this.paused) {
+	dt = this.pausetime - this.stime;
+    } else {
+	dt = Date.now() - this.stime;
+    }
+    
+    if (!this.element.draw(dt)) {
+	this.element.atend();
     }
 }
 
@@ -145,15 +309,24 @@ Playlist.prototype.clear = function(c) {
     ctx.restore();
 }
 
-
-Playlist.prototype.pause = function(b = !this.paused) {
-    if (this.tag == 'VIDEO') {
-	if (b) {
-	    this.paused = true;
-	    this.elements[this.current].pause();
-	} else {
-	    this.paused = false;
-	    this.elements[this.current].play();
+Playlist.prototype.setStyle = function(s) {
+    var ctx = this.context;
+    for (k in s) {
+	if (ctx[k]) {
+	    ctx[k] = s[k];
 	}
     }
 }
+
+Playlist.prototype.pause = function(b = !this.paused) {
+    if (b) {
+	this.paused = true;
+	this.pausetime = Date.now();
+	this.element.pause();
+    } else {
+	this.paused = false;
+	this.stime += Date.now() - this.pausetime;
+	this.element.play();
+    }
+}
+
