@@ -1,5 +1,6 @@
 var playlist;
 var mouse = {x: 0, y: 0};
+var msg = '';
 
 function init() {
     var cvs = document.getElementById('cvs');
@@ -9,8 +10,8 @@ function init() {
     body.addEventListener('mousemove',
 			  function(e) {
 
-			      mouse.x = Math.floor(e.clientX/window.innerWidth*100+.5)/100;
-			      mouse.y = Math.floor(e.clientY/window.innerHeight*100+.5)/100;
+			      mouse.x = Math.floor(e.clientX/window.innerWidth*100+.5);
+			      mouse.y = Math.floor(e.clientY/window.innerHeight*100+.5);
 			      return false;
 			  },
 			  false);
@@ -40,10 +41,12 @@ function setPlaylist(p) {}
 
 function Playlist (ctx,body) {
     var p = this;
+    var ua = navigator.userAgent,
+        event = (ua.match(/iPad/i)) ? "touchstart" : "click";
     body.addEventListener('keydown',
 			  function(e) {p.keypress(e); return false;},
 			  false);
-    body.addEventListener('click',
+    body.addEventListener(event,
 			  function(e) {p.mouseclick(e); return false;},
 			  false);
     body.addEventListener('contextmenu',
@@ -51,7 +54,7 @@ function Playlist (ctx,body) {
 			  false);
     this.elements = [];
     this.context = ctx;
-    this.current = 0;
+    this.current = sessionStorage.getItem("playlistSave") || 0;
     this.paused = true;
     this.stime = Date.now();
     this.pausetime = Date.now();
@@ -72,7 +75,7 @@ Playlist.prototype.keypress = function (e) {
 	this.pause();
     } else if (k == 76) {
 	// l
-	console.log(mouse);
+	console.log(msg,mouse);
     } else if (k == 48 || k == 38) {
 	// 0, up
 	this.restart();
@@ -87,10 +90,22 @@ Playlist.prototype.keypress = function (e) {
 
 Playlist.prototype.mouseclick = function(e) {
     e.preventDefault();
-    if (e.button == 0) {
-	this.next();
-    } else if (e.button == 2) {
-	this.previous();
+    if (e.type == "click") {
+	if (e.button == 0) {
+	    this.next();
+	} else if (e.button == 2) {
+	    this.previous();
+	}
+    } else {
+	if (e.touches[0].pageY/window.innerHeight > .9) {
+	    this.pause();
+	} else {
+	    if (e.touches[0].pageX/window.innerWidth > .5) {
+		this.next();
+	    } else {
+		this.previous();
+	    }
+	}
     }
 }
 
@@ -121,6 +136,15 @@ Playlist.prototype.addVideo = function(t) {
 	elt.appendChild(src);
     }
     var p = this;
+    var effect;
+    if (t.effect) {
+	effect = t.effect;
+    } else {
+	effect = function(dt,iw,ih,w,h) {
+	    var a = Math.min(w/iw,h/ih);
+	    return {x: w/2 - a*iw/2,y: h/2 - a*ih/2,w: a*iw,h: a*ih}
+	}
+    }
     var inplay;
     elt.addEventListener('ended',
 			 function(e) {
@@ -131,8 +155,11 @@ Playlist.prototype.addVideo = function(t) {
 	    draw: function(dt) {
 		var w = p.context.canvas.width;
 		var h = p.context.canvas.height;
-		p.clear();
-		p.context.drawImage(elt,0,0,w,h);
+		var iw = elt.videoWidth;
+		var ih = elt.videoHeight;
+		p.clear("black");
+		var c = effect(dt,iw,ih,w,h);
+		p.context.drawImage(elt,c.x,c.y,c.w,c.h);
 		return inplay;
 	    },
 	    activate: function() {
@@ -170,18 +197,22 @@ Playlist.prototype.addImage = function(t) {
     if (t.effect) {
 	effect = t.effect;
     } else {
-	effect = function(dt,w,h) {
-	    return {x: 0, y: 0, w: w, h: h}
+	effect = function(dt,iw,ih,w,h) {
+	    var a = Math.min(w/iw,h/ih);
+	    return {x: w/2 - a*iw/2,y: h/2 - a*ih/2,w: a*iw,h: a*ih}
 	}
     }
     var p = this;
     this.elements.push(
 	{
 	    draw: function(dt) {
+		msg = t.src;
 		var w = p.context.canvas.width;
 		var h = p.context.canvas.height;
-		p.clear();
-		var c = effect(dt,w,h);
+		var iw = elt.naturalWidth;
+		var ih = elt.naturalHeight;
+		p.clear("black");
+		var c = effect(dt,iw,ih,w,h);
 		p.context.drawImage(elt,c.x,c.y,c.w,c.h);
 		if (t.duration && dt > t.duration) {
 		    return false;
@@ -241,6 +272,7 @@ Playlist.prototype.next = function() {
     if (this.current < this.elements.length-1) {
 	this.element.deactivate();
 	this.current++;
+	sessionStorage.setItem("playlistSave",this.current);
 	this.element = this.elements[this.current];
 	this.element.activate();
 	this.stime = Date.now();
@@ -252,6 +284,7 @@ Playlist.prototype.previous = function() {
     if (this.current > 0) {
 	this.element.deactivate();
 	this.current--;
+	sessionStorage.setItem("playlistSave",this.current);
 	this.element = this.elements[this.current];
 	this.element.activate();
 	this.stime = Date.now();
@@ -268,6 +301,7 @@ Playlist.prototype.repeat = function() {
 Playlist.prototype.restart = function() {
     this.element.deactivate();
     this.current = 0;
+    sessionStorage.setItem("playlistSave",this.current);
     this.element = this.elements[this.current];
     this.element.activate();
     this.stime = Date.now();
@@ -276,6 +310,7 @@ Playlist.prototype.restart = function() {
 Playlist.prototype.finish = function() {
     this.element.deactivate();
     this.current = this.elements.length - 1;
+    sessionStorage.setItem("playlistSave",this.current);
     this.element = this.elements[this.current];
     this.element.activate();
     this.stime = Date.now();
@@ -318,7 +353,10 @@ Playlist.prototype.setStyle = function(s) {
     }
 }
 
-Playlist.prototype.pause = function(b = !this.paused) {
+Playlist.prototype.pause = function(b) {
+    if (typeof b === "undefined") {
+	b = !this.paused;
+    }
     if (b) {
 	this.paused = true;
 	this.pausetime = Date.now();
